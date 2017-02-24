@@ -120,6 +120,9 @@ func (m *Menu) Unselect() {
 }
 
 func (m *Menu) Hit(pt image.Point) {
+	if !m.Visible() {
+		return
+	}
 	m.hit(pt)
 	m.sender.Send(MenuEvent{Point: pt, Strings: m.Strings()})
 }

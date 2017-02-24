@@ -40,12 +40,12 @@ var (
 		HBack: image.NewUniform(color.RGBA{132, 255, 255, 0}),
 	}
 	defaultOption = &Option{
-		Font:   parseDefaultFont(12),
+		Font:   NewFont(parseDefaultFont(12)),
 		Wrap:   80,
 		Colors: *defaultColors,
 	}
 	largeScale = &Option{
-		Font:   parseDefaultFont(24),
+		Font:   NewFont(parseDefaultFont(24)),
 		Wrap:   80,
 		Colors: *defaultColors,
 	}
@@ -75,6 +75,8 @@ type Frame struct {
 	mousecache image.Point
 	Menu       *Menu
 	Mouse      *Mouse
+	
+	dot *Dot
 }
 
 type Colors struct {
@@ -84,7 +86,7 @@ type Colors struct {
 
 type Option struct {
 	// Font is the font face for the frame
-	Font font.Face
+	*Font
 
 	// Number of glyphs drawn on one line before wrapping
 	Wrap int
@@ -155,16 +157,8 @@ func New(origin, size image.Point, events Sender, opt *Option) *Frame {
 	return f
 }
 
-
-
 func (o Option) FontHeight() int {
-	if o.Font == nil {
-		return 0
-	}
-	if o.fontheight == 0 {
-		o.fontheight = int(o.Font.Metrics().Height>>6) + 1
-	}
-	return o.fontheight
+	return o.Font.Height()
 }
 
 func ParseDefaultFont(size float64) font.Face {
@@ -193,7 +187,7 @@ func (f *Frame) Insert(s []byte, i int) (err error) {
 	if s == nil {
 		return nil
 	}
-	f.grow(len(s))
+	f.grow(len(s)+1)
 	f.nbytes += len(s)
 	copy(f.s[i+len(s):], f.s[i:])
 	copy(f.s[i:], s)
@@ -235,7 +229,6 @@ var Clip []byte
 func (f *Frame) Handle(e interface{}) {
 
 	t := f.Tick
-	lastP1 := t.P1
 	switch e := e.(type) {
 	case key.Event:
 		f.dirty = true
@@ -256,60 +249,18 @@ func (f *Frame) Handle(e interface{}) {
 			t.P1--
 		case key.CodeDeleteBackspace:
 			t.Delete()
+		case key.CodeReturnEnter:
+			t.Write([]byte{'\n'})
+		case key.CodeTab:
+			t.Write([]byte("\t"))
 		default:
 			if e.Rune != -1 {
 				t.WriteRune(e.Rune)
 			}
 		}
 	case mouse.Event:
-		pt := image.Pt(int(e.X), int(e.Y))
 		f.Mouse.Process(e)
-		switch e.Button {
-		case mouse.ButtonRight:
-			f.Mark()
-			switch e.Direction {
-			case mouse.DirRelease:
-				if f.Menu.visible {
-					f.Menu.Hit(pt)
-				}
-				f.menu = false
-				f.Menu.dirty = false
-				f.Menu.visible = false
-			case mouse.DirPress:
-				f.mousecache = pt
-				f.menu = false
-				f.Menu.Unselect()
-				f.Menu.visible = true
-				f.Menu.dirty = true
-				f.Menu.sp = pt
-			case mouse.DirNone:
-			}
-		case mouse.ButtonLeft:
-			switch e.Direction {
-			case mouse.DirRelease:
-				f.selecting = false
-			case mouse.DirPress:
-				t.Close()
-				t.P1 = f.IndexOf(pt)
-				t.SelectAt(t.P1)
-				t.P0 = t.P1
-				f.dirty = true
-				f.selecting = true
-			case mouse.DirNone:
-				if f.selecting {
-					if t.P1 != lastP1 {
-						t.Sweep(t.P1)
-						t.dirty = true
-					}
-				}
-			}
-		case mouse.ButtonNone:
-			if f.Menu.visible {
-				//f.Menu.Hit(pt)
-				//f.dirty = true
-				//f.Menu.dirty = true
-			}
-		}
+		return
 	}
 }
 

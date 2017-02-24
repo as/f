@@ -1,14 +1,13 @@
 package frame
 
 import (
-	"bytes"
-	"golang.org/x/image/font"
-	"golang.org/x/image/math/fixed"
 	"image"
 	"image/color"
 	"image/draw"
-	"math"
-	"fmt"
+	
+
+	"golang.org/x/image/font"
+	"golang.org/x/image/math/fixed"
 )
 
 func (f *Frame) Draw() {
@@ -17,7 +16,7 @@ func (f *Frame) Draw() {
 
 type Drawer interface {
 	measure([]byte) int
-	drawtext(image.Point, int, []byte) int
+	drawtext(image.Point, int, []byte) (int, int)
 }
 
 var NL = []byte{'\n'}
@@ -36,17 +35,6 @@ func (f *Frame) drawmenu(pt image.Point) {
 	//Ellipse(f.disp, pt, B, 99, 99, 1, image.ZP, 1, 5)
 	//Ellipse(f.disp, pt, B, 94, 94, 1, image.ZP, 1, 5)
 	//Ellipse(f.disp, pt, B, 94, 94, 1, image.ZP, 1, 5)
-}
-
-func XEllipse(dst draw.Image, c image.Point, src image.Image, a, b, thick float64, sp image.Point, alpha, phi int) {
-	th := int(thick)
-	ath := th
-	dt := 1 / a * float64(ath/2)
-	for theta := float64(0); theta <= 2*math.Pi; theta += dt {
-		x, y := int(math.Cos(theta)*a), int(math.Sin(theta)*b)
-		r := image.Rect(0, 0, th, th).Add(c)
-		draw.Draw(dst, r.Add(image.Pt(x-ath, y-ath)), src, sp, draw.Src)
-	}
 }
 
 // Ellipse draws a filled ellipse at center point c
@@ -98,54 +86,50 @@ func Ellipse(dst draw.Image, c image.Point, src image.Image, a, b, thick int, sp
 	}
 }
 
+func (f *Frame) Resize(size image.Point) {
+	f.Tick.Resize(size)
+	f.resize(size)
+}
+
+func (f *Frame) reallocY(dot image.Point) bool {
+	if dot.Y >= f.Bounds().Max.Y {
+		f.resize(image.Pt(f.size.X, f.size.Y*2))
+		return true
+	}
+	return false
+}
+
+func (f *Frame) resize(size image.Point) {
+	f.size = size
+	f.disp = image.NewRGBA(image.Rect(0, 0, f.size.X, f.size.Y))
+	f.Redraw(f.selecting)
+	f.Option.Wrap = f.size.X - 2*f.Origin().X
+	return
+}
+
 // Redraw redraws the entire frame. The caller should check
 // that the frame is Dirty before calling this in a tight
 // loop
 func (f *Frame) Redraw(selecting bool) {
-	dy := f.Origin().Y
+	dot := NewDot(f.Origin(), f.Option.Wrap, f.Font)
 	draw.Draw(f.disp, f.Bounds(), f.Colors.Back, image.ZP, draw.Src)
-	dx := f.Origin().X
-	for s := f.s[:f.nbytes]; ; {
-		i := len(s)
-		if i == 0 {
-			break
+	
+	for s := f.s[:f.nbytes]; len(s) != 0;  {
+		i, sp := 0, dot.Point
+		for ;i < len(s) && sp.Y == dot.Y; i++{
+			dot.Insert(rune(s[i]))
 		}
-		if dx >= f.Wrap {
-			dx = f.Origin().X
-		}
-		j := bytes.Index(s[:i], NL)
-		if j >= 0 {
-			i = j
-			if dx >= f.Wrap {
-				dx = f.Origin().X
-				dy += f.FontHeight()
-			}
-		}
-		if dy >= f.Bounds().Max.Y {
-			f.size.Y *= 2
-			f.disp = image.NewRGBA(image.Rect(0, 0, f.size.X, f.size.Y))
-			f.Redraw(selecting)
-			return
-		}
-
-		dx += f.drawtext(image.Pt(f.Origin().X, dy), 75-dx-f.Origin().X, s[:i], )		
-		if dx >= f.Wrap {
-			dx = f.Origin().X
-			dy += f.FontHeight()
-		}
-		
-		if j >= 0 {
-			i++
-		}
-		if i == len(s) {
-			break
+		if i-1 >= 0 && i-1 < len(s) && s[i-1] == '\n'{
+			f.drawtext(sp, dot.maxw, s[:i-1])
+		} else {
+			f.drawtext(sp, dot.maxw, s[:i])
 		}
 		s = s[i:]
 	}
 	if selecting {
-		f.Tick.Sweep(f.Tick.P1)
+		//f.Tick.Sweep(f.Tick.P1)
 	}
-	f.Tick.Draw()
+	 f.Tick.Draw()
 	if f.Menu.visible {
 		f.Menu.Draw(f.disp)
 		//f.drawmenu(f.mousecache)
@@ -153,10 +137,11 @@ func (f *Frame) Redraw(selecting bool) {
 	f.dirty = false
 }
 
+
 // drawtext draws the slice s at position p and returns
 // the horizontal displacement dx without line wrapping
-func (f *Frame) drawtext(pt image.Point, width int, s []byte) (dx int) {
-	defer func() { fmt.Printf("drawtext %q @ %v drew %d pix\n", s, pt, dx) }()
+func (f *Frame) drawtext(pt image.Point, width int, s []byte) (dx int, i int) {
+	//defer func() { fmt.Printf("drawtext %q @ %v drew %d pix\n", s, pt, dx) }()
 	return f.stringbg(f.disp, pt, f.Colors.Text, image.ZP, f.Font, s, width, f.Colors.Text, image.ZP)
 }
 
@@ -164,59 +149,44 @@ func (f *Frame) measure(s []byte) int {
 	return int(font.MeasureBytes(f.Font, s) >> 6)
 }
 
-func (f *Frame) stringbg(dst draw.Image, p image.Point, src image.Image,sp image.Point, font font.Face, s []byte, width int, bg image.Image, bgp image.Point) int {
-	h := f.FontHeight()
+func (f *Frame) stringbg(dst draw.Image, p image.Point, src image.Image, sp image.Point, font font.Face, s []byte, width int, bg image.Image, bgp image.Point) (int, int) {
+	h := f.Font.Height()
 	h = int(float64(h) - float64(h)/float64(5))
+	i := 0
+	if f.dot == nil{
+		f.dot = NewDot(f.Origin(), f.Option.Wrap, f.Font)
+	}
 	for _, v := range s {
 		fp := fixed.P(p.X, p.Y)
-		dr, mask, maskp, advance, ok := font.Glyph(fp, rune(v))
-		if !ok {
-			break
+		
+		if f.dot.Visible(rune(v)){
+			dr, mask, maskp, _, ok := font.Glyph(fp, rune(v))
+			if !ok {
+				break
+			}
+			dr.Min.Y += h
+			dr.Max.Y += h
+			draw.DrawMask(dst, dr, src, sp, mask, maskp, draw.Over)
 		}
-		dr.Min.Y += h
-		dr.Max.Y += h
-		draw.DrawMask(dst, dr, src, sp, mask, maskp, draw.Over)
-		dx := int((advance + f.Font.Kern(f.last, rune(v))) >> 6)
+		
+		dx := f.dot.Advance(rune(v))
+		//dx := int((advance + f.Font.Kern(f.last, rune(v))) >> 6)
 		p.X += dx
+		i++
 		f.last = rune(v)
 		width -= dx
-		if width < 1{
+		if width < 1 {
 			break
 		}
 	}
-	return int(p.X)
+	return int(p.X), i
 }
 
 // drawsel draws a highlight over points p through q. A highlight
 // is a rectanguloid over three intersecting rectangles representing
 // the highlight bounds.
 func (t *Tick) drawsel(p, q image.Point, bg image.Image) {
-	h := t.Fr.FontHeight()
-	m := t.Fr.Bounds().Max
-	o := t.Fr.Origin()
-
-	// selection spans the same line
-	if p.Y == q.Y {
-		t.draw(p.X, p.Y, q.X, p.Y+h, bg)
-		return
-	}
-
-	// draw up to three rectangles for the
-	// selection
-
-	t.draw(p.X, p.Y, m.X, p.Y+h, bg)
-	p.Y += h
-	if p.Y != q.Y {
-		t.draw(o.X, p.Y, m.X, q.Y, bg)
-	}
-	t.draw(o.X, p.Y, q.X, q.Y+h, bg)
-}
-
-func (t *Tick) fill(x, y, xx, yy int) {
-	t.drawrect(image.Pt(x, y), image.Pt(xx, yy))
-}
-func (t *Tick) unfill(x, y, xx, yy int) {
-	t.deleterect(image.Pt(x, y), image.Pt(xx, yy))
+	t.Pen[0].Draw(p,q,bg)
 }
 
 func abs(x int) int {
@@ -224,22 +194,4 @@ func abs(x int) int {
 		return -x
 	}
 	return x
-}
-
-// drawrect draws a rectangle over the glyphs p0:p1
-func (t *Tick) draw(x, y, xx, yy int, bg image.Image) {
-	r := image.Rect(x, y, xx, yy)
-	draw.Draw(t.Img, r, bg, image.ZP, draw.Src)
-}
-
-// drawrect draws a rectangle over the glyphs p0:p1
-func (t *Tick) drawrect(pt0, pt1 image.Point) {
-	r := image.Rect(pt0.X, pt0.Y, pt1.X, pt1.Y)
-	draw.Draw(t.Img, r, t.Fr.Colors.HBack, image.ZP, draw.Src)
-}
-
-// delete draws a rectangle over the glyphs p0:p1
-func (t *Tick) deleterect(pt0, pt1 image.Point) {
-	r := image.Rect(pt0.X, pt0.Y, pt1.X, pt1.Y)
-	draw.Draw(t.Img, r, image.Transparent, image.ZP, draw.Src)
 }

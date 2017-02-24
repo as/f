@@ -15,13 +15,14 @@ type Sender interface{
 	SendFirst(i interface{})
 }
 
+
 func NewMouse(delay time.Duration, events Sender, f *Frame) *Mouse{
 	m := &Mouse{
 		Last: []Click{Click{}, Click{}},
 		doubled: delay,
 		Machine: NewMachine(events, f),
 	}
-	m.Sink = m.Machine.Run()
+	go m.Machine.Run()
 	return m
 }
 
@@ -49,6 +50,26 @@ type Mouse struct{
 	*Machine
 }
 
+// Machine is the conduit that state transitions happen
+// though. It contains a Skink chan for input mouse events
+// that drive the StateFns
+type Machine struct{
+	Sink chan mouse.Event
+	
+	f *Frame
+	
+	down mouse.Button
+	first mouse.Event
+	
+	double time.Duration
+	lastclick ClickEvent
+	lastsweep mouse.Event
+	ctr int
+	
+	// Should only send events, no recieving.
+	Sender
+}
+
 // State is the state of the machine
 type State int
 
@@ -70,11 +91,20 @@ type StateFn func(*Machine, mouse.Event) StateFn
 // a specific state transition
 type Action    func(mouse.Event)
 
+type MarkEvent struct{
+	mouse.Event
+}
 type SelectEvent struct{
 	mouse.Event
 }
+type ClickEvent struct{
+	mouse.Event
+	Time time.Time
+	Double bool
+}
 type SweepEvent struct{
 	mouse.Event
+	Ctr int
 }
 type SnarfEvent struct{
 	mouse.Event
@@ -86,18 +116,6 @@ type CommitEvent struct{
 	mouse.Event
 }
 
-// Machine is the conduit that state transitions happen
-// though. It contains a Skink chan for input mouse events
-// that drive the StateFns
-type Machine struct{
-	Sink chan mouse.Event
-	
-	f *Frame
-	
-	// Should only send events, no recieving.
-	Sender
-}
-
 // NewMachine initialize a new state machine with no-op
 // functions for all chording events.
 func NewMachine(deque Sender, f *Frame) *Machine{
@@ -105,9 +123,52 @@ func NewMachine(deque Sender, f *Frame) *Machine{
 		Sink: make(chan mouse.Event),
 		f: f,
 		Sender: deque,
+		down: 0,
+		double: time.Second/4,
 	}
 }
 
+func (m *Machine) press(e mouse.Event) bool{
+	if e.Direction != mouse.DirPress{
+		return false
+	}
+	if e.Button == mouse.ButtonNone {
+		return false
+	}
+	if e.Button & m.down != 0{
+		return false
+		//panic("bug: mouse button pressed > 1 without release")
+	}
+	m.down |= e.Button
+	fmt.Printf("press: event = %#v\n", e)
+	return true
+}
+func (m *Machine) release(e mouse.Event) bool{
+	if e.Direction != mouse.DirRelease{
+		return false
+	}
+	if e.Button == mouse.ButtonNone {
+		return false
+	}
+	if e.Button & m.down == 0{
+		return false
+		//panic("bug: release unpressed button")
+	}
+	fmt.Printf("release: event = %#v\n", e)
+	m.down &= ^e.Button
+	return true
+}
+func (m *Machine) CloseTo(e, f mouse.Event) bool{
+	return abs(int(e.X-f.X)) < 4 && abs(int(e.Y-f.Y)) < 4
+}
+
+func (m *Machine) left(e mouse.Event) bool{ return e.Button == mouse.ButtonLeft}
+func (m *Machine) right(e mouse.Event) bool{ return e.Button == mouse.ButtonRight}
+func (m *Machine) mid(e mouse.Event) bool{ return e.Button == mouse.ButtonMiddle}
+func (m *Machine) none(e mouse.Event) bool{ return e.Button == mouse.ButtonNone }
+func (m *Machine) terminates(e mouse.Event) bool{
+	return m.release(e) && m.down == 0
+}
 
 func (m *Machine) Run() chan mouse.Event {
 	go func(){
@@ -119,82 +180,111 @@ func (m *Machine) Run() chan mouse.Event {
 	return m.Sink
 }
 func none(m *Machine, e mouse.Event) StateFn {
-	if e.Direction == mouse.DirPress || e.Button == mouse.ButtonLeft {
-		return selecting(m, e)
+	if m.press(e) {
+		return marking(m, e)
+	}
+	m.first = mouse.Event{}
+	return none
+}
+
+func marking(m *Machine, e mouse.Event) StateFn{
+	m.first = e
+	m.Send(MarkEvent{Event: e})
+	m.lastsweep = e
+	m.ctr = 0
+	t := time.Now()
+	if m.lastclick.Button == 1 && t.Sub(m.lastclick.Time) < m.double {
+			m.lastclick = ClickEvent{
+				Event: e,
+				Double: true,
+				Time: t,
+			}
+			m.Send(m.lastclick)
+	}
+	return sweeping(m, e)
+}
+
+func selecting(m *Machine, e mouse.Event) StateFn {
+	if m.terminates(e) {
+		fmt.Printf("CommitEvent: event = %#v\n", e)
+		return commit(m, e)
 	}
 	return none
 }
 
-func terminus(e mouse.Event) bool{
-	return e.Direction == mouse.DirRelease && e.Button == mouse.ButtonLeft
-}
-
-func selecting(m *Machine, e mouse.Event) StateFn {
-	if e.Direction == mouse.DirPress && e.Button == mouse.ButtonLeft {
-		m.f.selecting = true
-		m.Send(SelectEvent{Event: e})
-		return selecting
-	} else if terminus(e) {
-		return commit(m, e)
-	}
-	return sweeping
-}
 func sweeping(m *Machine, e mouse.Event) StateFn{
-	if e.Direction == mouse.DirNone{
-		
-		m.Send(SweepEvent{Event: e})
-		return sweeping
+	if m.terminates(e) {
+		switch{
+		case m.CloseTo(e, m.first):
+			t := time.Now()
+			m.lastclick = ClickEvent{
+				Event: e,
+				Time: t,
+			}
+			m.Send(m.lastclick)
+			return none
+		default:
+			m.Send(SelectEvent{Event: e})
+			return selecting
+		}
 	}
-	if terminus(e) {
-		return none
-	}
-	if e.Direction == mouse.DirPress {
-		switch e.Button{
-		case mouse.ButtonMiddle:
+	if m.press(e) {
+		switch {
+		case m.mid(e):
+			fmt.Printf("SnarfEvent: = %#v\n", e)
 			return snarfing(m, e)
-		case mouse.ButtonRight:
+		case m.right(e):
+			fmt.Printf("InsertEvent: = %#v\n", e)
 			return inserting(m, e)
 		}
 	}	
+	if !m.CloseTo(e, m.lastsweep){
+		e.Button = m.first.Button
+		fmt.Printf("SweepEvent: = %#v\n", e)
+		m.Send(SweepEvent{Event: e, Ctr: m.ctr})
+		m.ctr++
+		m.lastsweep = e
+	}
 	return sweeping
 }
 func snarfing(m *Machine, e mouse.Event) StateFn {
-	if e.Direction == mouse.DirNone{
-		return snarfing
-	}
-	if e.Direction == mouse.DirPress {
-		if e.Button == mouse.ButtonMiddle {
-			m.f.selecting = false
+	fmt.Printf("snarfing: event = %#v\n", e)
+	if m.press(e)  {
+		if m.mid(e) {
+			fmt.Printf("SnarfEvent: = %#v\n", e)
 			m.Send(SnarfEvent{Event: e})
 			return snarfing
 		}
-		if e.Button == mouse.ButtonRight {
+		if m.right(e) {
 			return inserting(m, e)
 		}
-	} else if terminus(e){
+	} 
+	if m.terminates(e){
 		return commit(m, e)
 	}
 	return snarfing
 }
+
 func inserting(m *Machine, e mouse.Event) StateFn {
-	if e.Direction == mouse.DirNone{
-		return inserting
-	}
-	if e.Direction == mouse.DirPress {
-		if e.Button == mouse.ButtonMiddle {
+	fmt.Printf("inserting: event = %#v\n", e)
+	switch{
+	case m.press(e):
+		switch{
+		case m.mid(e): 
 			return snarfing(m, e)
-		}
-		if e.Button == mouse.ButtonRight {
+		case m.right(e):
 			m.f.selecting = false
+			fmt.Printf("InsertEvent: = %#v\n", e)
 			m.Send(InsertEvent{Event: e})
 			return inserting
 		}
-	} else if terminus(e){
+	case m.terminates(e):
 		return commit(m, e)
 	}
 	return inserting
 }
 func commit(m *Machine, e mouse.Event) StateFn {
+	fmt.Printf("commit: event = %#v\n", e)
 	m.Send(CommitEvent{Event: e})
 	return none
 }
@@ -202,39 +292,6 @@ func commit(m *Machine, e mouse.Event) StateFn {
 func (m *Mouse) Process(e mouse.Event){
 	m.Sink <- e
 	return
-	if e.Direction == mouse.DirNone && e.Button == mouse.ButtonNone {
-		return
-	}
-	c := Click{
-		Button: m.Down,
-		At: image.Pt(int(e.X), int(e.Y)),
-		Time: time.Now(),
-	}
-	if e.Direction == mouse.DirPress{
-		c.Button = e.Button
-		if m.Chord.Seq == 0{
-			m.Chord.Start = int(e.Button)
-		}
-		m.Chord.Seq = int(m.Chord.Seq << 8 | int(e.Button))
-		m.Chord.Step++
-		if m.Chord.Step > 4{
-			m.Chord.Start = 0
-			m.Chord.Seq = 0
-			m.Chord.Step = 0
-		}
-		fmt.Printf("Chord Sequence %x\n", m.Chord.Seq)
-	} else if e.Direction == mouse.DirRelease{
-		c.Button = mouse.ButtonNone
-		if int(e.Button) != m.Chord.Start || m.Chord.Step < 2 {
-			m.Chord.Seq = 0
-		}
-	} else if e.Direction == mouse.DirNone{
-		c.Button = m.Last[0].Button
-	}
-	m.Down = c.Button
-	if e.Direction == mouse.DirPress && e.Button != mouse.ButtonNone{
-		m.Last = append([]Click{c}, m.Last...)
-	}
 }
 
 func (m *Mouse) Pt() image.Point{

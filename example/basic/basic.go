@@ -18,8 +18,12 @@ import (
 	"log"
 	"strings"
 	"time"
+	"os"
+	"sync"
 
 	"github.com/as/frame"
+	"github.com/as/cursor"
+	window "github.com/as/ms/win"
 )
 
 var winSize = image.Pt(550, 1080)
@@ -38,10 +42,14 @@ func debugln(i ...interface{}){
 	}
 }
 
+func moveMouse(pt image.Point){
+	cursor.MoveTo(window.ClientAbs().Min.Add(pt))
+}
+
 func main() {
 	fmt.Print()
 	driver.Main(func(src screen.Screen) {
-		var focused bool
+		var focused, resized bool
 		win, _ := src.NewWindow(&screen.NewWindowOptions{winSize.X, winSize.Y})
 		tx, _ := src.NewTexture(winSize)
 		buf, _ := src.NewBuffer(winSize)
@@ -51,27 +59,172 @@ func main() {
 				win,
 				&frame.Option{
 					Colors: *frame.DefaultColors,
-					Font: frame.ParseDefaultFont(20),
-					Wrap: 40,
+					Font: frame.NewFont(frame.ParseDefaultFont(16)),
+					Wrap: 100,
 		})
-		t := &frame.Tick{
-			Fr: fr, 
-			Select: frame.Select{
-				Img: image.NewRGBA(fr.Bounds()),
-			},
-		}
+		t := frame.NewTick(fr)
 		fr.Tick = t
 		Clip = make([]byte, t.Size()+1)
-		t.Write([]byte(""))
-		go func(){
-		for _, y := range []string{"super", "mink", "super", "mink", "super", "minky"}{
-			v := []byte(y)
-			t.Write(v)
-			time.Sleep(time.Second/2)
+		if len(os.Args) > 1{
+			fd, err := os.Open(os.Args[1])
+			defer fd.Close()
+			if err != nil{
+				log.Fatalln(err)
+			}
+			io.Copy(t, fd)
 		}
-		}()
+		
 		for {
 			switch e := win.NextEvent().(type) {
+			case frame.MarkEvent:
+				fmt.Printf("frame.MarkEvent: %#v\n", e)
+				pt := image.Pt(int(e.X), int(e.Y))
+				i := fr.IndexOf(pt)
+				switch e.Button{
+				case 1:
+					t.Open(i)
+					fr.Mark()
+					win.Send(paint.Event{})
+				case 3:
+					t.Pen[2].Open(i)
+				}
+			//	t.SelectAt(fr.IndexOf(pt))
+			case frame.SweepEvent:
+				debugln("f.Mouse.OnSweep")
+				if fr.Menu.Visible(){
+					continue
+				}
+				pt := image.Pt(int(e.X), int(e.Y))
+				i := fr.IndexOf(pt)
+				switch e.Button{
+				case 3:
+					t.Pen[2].Sweep(i)
+					fr.Mark()
+					win.Send(paint.Event{})
+				case 1:
+					t.Sweep(i)
+					fr.Mark()
+					debugln("leave f.Mouse.OnSweep")
+				}
+			case frame.ClickEvent:
+				fmt.Printf("frame.ClickEvent: %#v\n", e)
+				pt := image.Pt(int(e.X), int(e.Y))
+				i := fr.IndexOf(pt)
+				switch e.Button{
+				case 1:
+					if e.Double{
+						if i, j := t.FindSpecial(i); j != -1{
+							t.Open(i)
+							t.Sweep(j)
+							t.Commit()
+						} else {
+							t.Open(i)
+						}
+					}
+				case 2:
+					if t.In(pt){
+						
+						fr.Mark()
+					}
+				case 3:
+					if !t.In(pt){
+						if i, j := t.FindSpecial(i); j != -1{
+							t.Open(i)
+							t.Sweep(j)
+							t.Commit()
+						} else {
+							t.Open(i)
+						}					
+					}
+						t.Next()
+						moveMouse(t.Pen[0].Sp())
+						fr.Mark()
+				}
+			case frame.SelectEvent:
+				debugln("f.Mouse.OnSelect")
+				fmt.Printf("event information: %#v\n", e)
+				pt := image.Pt(int(e.X), int(e.Y))
+				i := fr.IndexOf(pt)
+				switch e.Button {
+				case 3:
+					h, _ := t.Pen[2].Addr()
+					t.Open(h)
+					t.Sweep(i)
+					t.Commit()
+					t.Next()
+					moveMouse(t.Pen[0].Sp())
+					fr.Mark()
+				default:
+					t.Sweep(i)
+					t.Commit()
+					fr.Mark()
+				}
+				debugln("leave f.Mouse.OnSelect")
+			case frame.SnarfEvent:
+				debugln("f.Mouse.OnSnarf")
+				fmt.Println("Clip size is", len(Clip))
+				if len(Clip) > 0{
+					fmt.Println("t.Read(Clip)")
+					t.Read(Clip)
+					fmt.Println("t.Delete")
+					t.Delete()
+					t.P1 = t.P0
+					t.Open(t.P0)
+					fr.Mark()
+				}
+				debugln("leave f.Mouse.OnSnarf")
+			case frame.InsertEvent:
+				if fr.Menu.Visible(){
+					continue
+				}
+				fmt.Println("f.Mouse.OnInsert")
+				fmt.Println("write %s\n", Clip)
+				t.Write(Clip[:])
+				t.P0 -= len(Clip)
+				t.Open(t.P1)
+				fr.Mark()
+				fmt.Println("leave f.Mouse.OnInsert")
+			case key.Event:
+					fr.Handle(e)
+				win.Send(paint.Event{})
+			case mouse.Event:
+				fr.Handle(e)
+				win.Send(paint.Event{})
+			case size.Event:
+				winSize = image.Pt(e.WidthPx, e.HeightPx)
+				wg.Add(2)
+				resized = true
+				fr.Mark()
+				go func(){ tx, _ = src.NewTexture(winSize); wg.Done();}()
+				go func(){  buf, _ = src.NewBuffer(winSize); wg.Done();}()
+				wg.Wait()
+				fr.Resize(winSize)
+			case paint.Event:
+				if fr.Dirty() {
+					 fr.Draw()
+					draw.Draw(buf.RGBA(), buf.Bounds(), fr.RGBA(), image.ZP, draw.Src)
+					tx.Upload(image.ZP, buf, buf.Bounds())
+					win.Copy(buf.Bounds().Min, tx, tx.Bounds(), screen.Over, nil)
+				} else if !focused || resized{
+					fr.Draw()
+					draw.Draw(buf.RGBA(), buf.Bounds(), fr.RGBA(), image.ZP, draw.Src)
+					tx.Upload(image.ZP, buf, buf.Bounds())
+					win.Copy(buf.Bounds().Min, tx, tx.Bounds(), screen.Over, nil)
+					if resized {
+						resized = false
+					}
+				}
+				win.Publish()
+			case lifecycle.Event:
+				if e.To == lifecycle.StageDead {
+					return
+				}
+				// NT doesn't repaint the window if another window covers it
+				if e.Crosses(lifecycle.StageFocused) == lifecycle.CrossOff{
+					focused = false
+				} else if e.Crosses(lifecycle.StageFocused) == lifecycle.CrossOn{
+					focused = true
+				}
 			case frame.MenuEvent:
 				debugf("frame.MenuEvent %#v\n", e)
 				var(
@@ -118,115 +271,19 @@ func main() {
 					}
 					c.Wait()
 				}(out)
-				
-				/*
-				log.Printf("frame.MenuEvent %#v\n", e)
-				var(
-					cmd string
-					args []string
-				)
-				s := e.Strings
-				if len(s) == 0{
-					continue
-				}
-				cmd = s[0]
-				if len(s) > 1{
-					args = s[1:]
-				}
-				c := exec.Command(cmd, args...)
-				out, _ := c.StdoutPipe()
-				go func(out io.ReadCloser){
-					defer out.Close()
-					var buf [8192]byte
-					for{
-						n, err := out.Read(buf[:])
-						if n > 0{
-							t.Write(buf[:])
-						}
-						if err != nil{
-							t.Write([]byte(fmt.Sprintln(err)))
-							break
-						}
-					}
-				}(out)
-				if err := c.Start(); err != nil{
-					log.Printf("cmd %q: %s\n", cmd, err)
-				}
-				c.Wait()
-				*/
-			case frame.SelectEvent:
-				debugln("f.Mouse.OnSelect")
-				pt := image.Pt(int(e.X), int(e.Y))
-				t.Close()
-				t.P0 = fr.IndexOf(pt)
-				t.P1 = t.P0
-				t.SelectAt(t.P0)
-				fr.Mark()
-				debugln("leave f.Mouse.OnSelect")
-			case frame.SweepEvent:
-				if fr.Menu.Visible(){
-					continue
-				}
-				debugln("f.Mouse.OnSweep")
-				pt := image.Pt(int(e.X), int(e.Y))
-				t.P1 = fr.IndexOf(pt)
-				fmt.Println("p0/p1", t.P0, t.P1)
-				fr.Mark()
-				debugln("leave f.Mouse.OnSweep")
-			case frame.SnarfEvent:
-				debugln("f.Mouse.OnSnarf")
-				fmt.Println("Clip size is", len(Clip))
-				t.Read(Clip[:])
-				t.Delete()
-				t.P1 = t.P0
-				t.SelectAt(t.P0)
-				fr.Mark()
-				debugln("leave f.Mouse.OnSnarf")
-			case frame.InsertEvent:
-				if fr.Menu.Visible(){
-					continue
-				}
-				fmt.Println("f.Mouse.OnInsert")
-				fmt.Println("write %s\n", Clip)
-				t.Write(Clip[:])
-				t.P0 -= len(Clip)
-				t.SelectAt(t.P1)
-				fr.Mark()
-				fmt.Println("leave f.Mouse.OnInsert")
-			case key.Event:
-				if e.Code == key.CodeReturnEnter {
-					t.Write([]byte{'\n'})
-				} else {
-					fr.Handle(e)
-				}
-				win.Send(paint.Event{})
-			case mouse.Event:
-				fr.Handle(e)
-				win.Send(paint.Event{})
-			case size.Event, paint.Event:
-				if fr.Dirty() || true{
-					fr.Draw()
-					draw.Draw(buf.RGBA(), buf.Bounds(), fr.RGBA(), image.ZP, draw.Src)
-					tx.Upload(image.ZP, buf, buf.Bounds())
-					win.Copy(buf.Bounds().Min, tx, tx.Bounds(), screen.Over, nil)
-				} else if  !focused{
-					win.Copy(buf.Bounds().Min, tx, tx.Bounds(), screen.Over, nil)
-				}
-				win.Publish()
-			case lifecycle.Event:
-				if e.To == lifecycle.StageDead {
-					return
-				}
-				// NT doesn't repaint the window if another window covers it
-				if e.Crosses(lifecycle.StageFocused) == lifecycle.CrossOff{
-					focused = false
-				} else if e.Crosses(lifecycle.StageFocused) == lifecycle.CrossOn{
-					focused = true
-				}
 			}
 		}
 	})
 }
+
+var wg sync.WaitGroup
+
+var timer *time.Timer
+
+func init(){
+	
+}
+
 /*
 		measure := func(p []byte) int{
 			x := font.MeasureBytes(fr.Font, p)
