@@ -16,25 +16,25 @@ func (f *Frame) IndexOf(pt image.Point) (i int) {
 	pt = f.alignY(pt)
 	dot := NewDot(f.Origin(), f.Option.Wrap, f.Font)
 	s := f.s[:f.nbytes]
-	for i = 0; i < len(s); i++{
-		switch{
+	for i = 0; i < len(s); i++ {
+		switch {
 		case dot.Y < pt.Y:
 			// nothing special
 		case dot.Y == pt.Y:
 			// same line
-			if dot.X+dot.Advance(rune(s[i]))/2 >= pt.X{
+			if dot.X+dot.Advance(rune(s[i]))/2 >= pt.X {
 				return i
 			}
 		case dot.Y > pt.Y:
 			// advanced too far
-			if i-1 < 0{
+			if i-1 < 0 {
 				// bug fix for crash: happened when selecting
 				// and dragging all the way to the top
 				return i
 			}
-			if s[i-1] == '\n'{
+			if s[i-1] == '\n' {
 				// a hard newline
-				return i-1
+				return i - 1
 			} else {
 				// line wrapped
 				return i

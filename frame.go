@@ -3,7 +3,7 @@ package frame
 import (
 	"github.com/golang/freetype/truetype"
 	"golang.org/x/image/font"
-	"golang.org/x/image/font/gofont/goregular"
+	"golang.org/x/image/font/gofont/gomedium"
 	"golang.org/x/mobile/event/key"
 	"golang.org/x/mobile/event/mouse"
 	"image"
@@ -23,7 +23,7 @@ var (
 	DefaultColors  = defaultColors
 	DarkGrayColors = &Colors{
 		Back:  image.NewUniform(color.RGBA{33, 33, 33, 4}),
-		Text:  image.NewUniform(color.RGBA{128, 128, 128, 255}),
+		Text:  image.NewUniform(color.RGBA{0, 128 + 64, 128 + 64, 255}),
 		HText: image.NewUniform(color.RGBA{0, 0, 0, 255}),
 		HBack: image.NewUniform(color.RGBA{0, 128, 128, 64}),
 	}
@@ -34,10 +34,10 @@ var (
 		HBack: image.NewUniform(color.RGBA{0, 128, 128, 64}),
 	}
 	defaultColors = &Colors{
-		Back:  image.NewUniform(color.RGBA{66, 66, 66, 0}),
+		Back:  image.NewUniform(color.RGBA{33, 33, 33, 0}),
 		Text:  image.NewUniform(color.RGBA{0, 255, 255, 255}),
 		HText: image.NewUniform(color.RGBA{0, 0, 0, 255}),
-		HBack: image.NewUniform(color.RGBA{132, 255, 255, 0}),
+		HBack: image.NewUniform(color.RGBA{33, 255, 255, 0}),
 	}
 	defaultOption = &Option{
 		Font:   NewFont(parseDefaultFont(12)),
@@ -59,12 +59,13 @@ type Frame struct {
 	Option
 	Tick *Tick
 
-	s         []byte
-	width     int
-	nbytes    int
-	dirty     bool
-	selecting bool
-	menu      bool
+	s          []byte
+	width      int
+	nbytes     int
+	dirty      bool
+	dirtyrange []Range
+	selecting  bool
+	menu       bool
 
 	Cache Cache
 	// cache for the transformation
@@ -75,7 +76,7 @@ type Frame struct {
 	mousecache image.Point
 	Menu       *Menu
 	Mouse      *Mouse
-	
+
 	dot *Dot
 }
 
@@ -145,15 +146,15 @@ func New(origin, size image.Point, events Sender, opt *Option) *Frame {
 						},
 					},
 				},
-			}, 
+			},
 		},
 	}
-	menu=menu
+	menu = menu
 	f.Menu = NewMenuFS(`C:\menu\`, f, events)
 	f.disp = image.NewRGBA(f.Bounds())
 	f.cached = image.NewRGBA(image.Rectangle{image.ZP, image.Pt(f.FontHeight(), f.FontHeight())})
 	f.flushcache()
-	f.Mouse = NewMouse(time.Second/3,events, f)
+	f.Mouse = NewMouse(time.Second/3, events, f)
 	return f
 }
 
@@ -166,13 +167,27 @@ func ParseDefaultFont(size float64) font.Face {
 }
 
 func parseDefaultFont(size float64) font.Face {
-	f, err := truetype.Parse(goregular.TTF)
+	f, err := truetype.Parse(gomedium.TTF)
 	if err != nil {
 		panic(err)
 	}
 	return truetype.NewFace(f, &truetype.Options{
 		Size: size,
 	})
+}
+
+type Range struct {
+	I, J int
+}
+
+func (f *Frame) MarkRange(i, j int) {
+	f.dirtyrange = append(f.dirtyrange, Range{i, j})
+}
+func (f *Frame) DirtyRange() []Range {
+	return f.dirtyrange
+}
+func (f *Frame) CleanRange() {
+	f.dirtyrange = nil
 }
 
 // Insert inserts s starting from index i in the
@@ -187,10 +202,11 @@ func (f *Frame) Insert(s []byte, i int) (err error) {
 	if s == nil {
 		return nil
 	}
-	f.grow(len(s)+1)
+	f.grow(len(s) + 1)
 	f.nbytes += len(s)
 	copy(f.s[i+len(s):], f.s[i:])
 	copy(f.s[i:], s)
+	f.MarkRange(i, i+len(s))
 	f.dirty = true
 	return nil
 }
@@ -212,17 +228,16 @@ func (f *Frame) Delete(i, j int) (err error) {
 	if f.nbytes < 0 {
 		f.nbytes = 0
 	}
+	f.MarkRange(i, f.nbytes)
 	f.dirty = true
 	return nil
 }
 
-func (f *Frame) Mark(){
+func (f *Frame) Mark() {
 	f.dirty = true
 }
 
 var Clip []byte
-
-
 
 // Handle handles events sent to the frame. The key.Event
 // and mouse.Events are handled.

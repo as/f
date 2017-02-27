@@ -59,7 +59,7 @@ func main() {
 				win,
 				&frame.Option{
 					Colors: *frame.DefaultColors,
-					Font: frame.NewFont(frame.ParseDefaultFont(16)),
+					Font: frame.NewFont(frame.ParseDefaultFont(52)),
 					Wrap: 100,
 		})
 		t := frame.NewTick(fr)
@@ -200,16 +200,48 @@ func main() {
 				wg.Wait()
 				fr.Resize(winSize)
 			case paint.Event:
-				if fr.Dirty() {
-					 fr.Draw()
+				if fr.Dirty() || true{
+					 fr.Draw(false)
 					draw.Draw(buf.RGBA(), buf.Bounds(), fr.RGBA(), image.ZP, draw.Src)
 					tx.Upload(image.ZP, buf, buf.Bounds())
 					win.Copy(buf.Bounds().Min, tx, tx.Bounds(), screen.Over, nil)
 				} else if !focused || resized{
-					fr.Draw()
-					draw.Draw(buf.RGBA(), buf.Bounds(), fr.RGBA(), image.ZP, draw.Src)
-					tx.Upload(image.ZP, buf, buf.Bounds())
-					win.Copy(buf.Bounds().Min, tx, tx.Bounds(), screen.Over, nil)
+					fr.Draw(true)
+				//draw.Draw(buf.RGBA(), buf.Bounds(), fr.RGBA(), image.ZP, draw.Src)
+						var wg sync.WaitGroup
+						pieces := 4
+						x, y := 0, 0
+						dx := buf.Bounds().Max.X/pieces
+						dy := buf.Bounds().Max.Y
+						wg.Add(pieces)
+						for i := 0; i < pieces; i++{
+							go func(r image.Rectangle){
+			draw.Draw(buf.RGBA(), r, fr.RGBA(), r.Min, draw.Src); wg.Done()
+					 		}(image.Rect(x,y,x+dx,dy))
+					 		x += dx
+					 	}
+					 	wg.Wait()
+						
+						x, y = 0, 0
+						wg.Add(pieces)
+						for i := 0; i < pieces; i++{
+							go func(r image.Rectangle){
+					 			tx.Upload(r.Min, buf, r); wg.Done()
+					 		}(image.Rect(x,y,x+dx,dy))
+					 		x += dx
+					 	}
+					 	wg.Wait()
+					 	//win.Copy(buf.Bounds().Min, tx, buf.Bounds(), screen.Over, nil)
+
+						x, y = 0, 0
+						wg.Add(pieces)
+						for i := 0; i < pieces; i++{
+							go func(r image.Rectangle){
+								win.Copy(r.Min, tx, r, screen.Over, nil); wg.Done()
+					 		}(image.Rect(x,y,x+dx,dy))
+					 		x += dx
+					 	}
+					 	wg.Wait()					 	
 					if resized {
 						resized = false
 					}

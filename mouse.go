@@ -1,24 +1,24 @@
 package frame
+
 // The chord implementation kinda sucks
 // make it so that 'if one is held down and two is pressed'
 // instead of tying to pack everything into a bit vector
 
 import (
-	"golang.org/x/mobile/event/mouse"
-	"time"
-	"image"
 	"fmt"
+	"golang.org/x/mobile/event/mouse"
+	"image"
+	"time"
 )
 
-type Sender interface{
+type Sender interface {
 	Send(i interface{})
 	SendFirst(i interface{})
 }
 
-
-func NewMouse(delay time.Duration, events Sender, f *Frame) *Mouse{
+func NewMouse(delay time.Duration, events Sender, f *Frame) *Mouse {
 	m := &Mouse{
-		Last: []Click{Click{}, Click{}},
+		Last:    []Click{Click{}, Click{}},
 		doubled: delay,
 		Machine: NewMachine(events, f),
 	}
@@ -26,46 +26,46 @@ func NewMouse(delay time.Duration, events Sender, f *Frame) *Mouse{
 	return m
 }
 
-type Chord struct{
+type Chord struct {
 	Start int
-	Seq int
-	Step int
-}
-	
-type Click struct{
-	Button mouse.Button
-	At image.Point
-	Time time.Time
+	Seq   int
+	Step  int
 }
 
-type Mouse struct{
+type Click struct {
+	Button mouse.Button
+	At     image.Point
+	Time   time.Time
+}
+
+type Mouse struct {
 	Chord Chord
-	Last []Click
-	Down mouse.Button
-	At image.Point
-	
+	Last  []Click
+	Down  mouse.Button
+	At    image.Point
+
 	doubled time.Duration
-	last time.Time
-	
+	last    time.Time
+
 	*Machine
 }
 
 // Machine is the conduit that state transitions happen
 // though. It contains a Skink chan for input mouse events
 // that drive the StateFns
-type Machine struct{
+type Machine struct {
 	Sink chan mouse.Event
-	
+
 	f *Frame
-	
-	down mouse.Button
+
+	down  mouse.Button
 	first mouse.Event
-	
-	double time.Duration
+
+	double    time.Duration
 	lastclick ClickEvent
 	lastsweep mouse.Event
-	ctr int
-	
+	ctr       int
+
 	// Should only send events, no recieving.
 	Sender
 }
@@ -73,7 +73,7 @@ type Machine struct{
 // State is the state of the machine
 type State int
 
-const(
+const (
 	StateNone State = iota
 	StateSelect
 	StateSweep
@@ -89,53 +89,53 @@ type StateFn func(*Machine, mouse.Event) StateFn
 
 // Action executes a procedure on the event of
 // a specific state transition
-type Action    func(mouse.Event)
+type Action func(mouse.Event)
 
-type MarkEvent struct{
+type MarkEvent struct {
 	mouse.Event
 }
-type SelectEvent struct{
+type SelectEvent struct {
 	mouse.Event
 }
-type ClickEvent struct{
+type ClickEvent struct {
 	mouse.Event
-	Time time.Time
+	Time   time.Time
 	Double bool
 }
-type SweepEvent struct{
+type SweepEvent struct {
 	mouse.Event
 	Ctr int
 }
-type SnarfEvent struct{
+type SnarfEvent struct {
 	mouse.Event
 }
-type InsertEvent struct{
+type InsertEvent struct {
 	mouse.Event
 }
-type CommitEvent struct{
+type CommitEvent struct {
 	mouse.Event
 }
 
 // NewMachine initialize a new state machine with no-op
 // functions for all chording events.
-func NewMachine(deque Sender, f *Frame) *Machine{
+func NewMachine(deque Sender, f *Frame) *Machine {
 	return &Machine{
-		Sink: make(chan mouse.Event),
-		f: f,
+		Sink:   make(chan mouse.Event),
+		f:      f,
 		Sender: deque,
-		down: 0,
-		double: time.Second/4,
+		down:   0,
+		double: time.Second / 5,
 	}
 }
 
-func (m *Machine) press(e mouse.Event) bool{
-	if e.Direction != mouse.DirPress{
+func (m *Machine) press(e mouse.Event) bool {
+	if e.Direction != mouse.DirPress {
 		return false
 	}
 	if e.Button == mouse.ButtonNone {
 		return false
 	}
-	if e.Button & m.down != 0{
+	if e.Button&m.down != 0 {
 		return false
 		//panic("bug: mouse button pressed > 1 without release")
 	}
@@ -143,14 +143,14 @@ func (m *Machine) press(e mouse.Event) bool{
 	fmt.Printf("press: event = %#v\n", e)
 	return true
 }
-func (m *Machine) release(e mouse.Event) bool{
-	if e.Direction != mouse.DirRelease{
+func (m *Machine) release(e mouse.Event) bool {
+	if e.Direction != mouse.DirRelease {
 		return false
 	}
 	if e.Button == mouse.ButtonNone {
 		return false
 	}
-	if e.Button & m.down == 0{
+	if e.Button&m.down == 0 {
 		return false
 		//panic("bug: release unpressed button")
 	}
@@ -158,22 +158,22 @@ func (m *Machine) release(e mouse.Event) bool{
 	m.down &= ^e.Button
 	return true
 }
-func (m *Machine) CloseTo(e, f mouse.Event) bool{
+func (m *Machine) CloseTo(e, f mouse.Event) bool {
 	return abs(int(e.X-f.X)) < 4 && abs(int(e.Y-f.Y)) < 4
 }
 
-func (m *Machine) left(e mouse.Event) bool{ return e.Button == mouse.ButtonLeft}
-func (m *Machine) right(e mouse.Event) bool{ return e.Button == mouse.ButtonRight}
-func (m *Machine) mid(e mouse.Event) bool{ return e.Button == mouse.ButtonMiddle}
-func (m *Machine) none(e mouse.Event) bool{ return e.Button == mouse.ButtonNone }
-func (m *Machine) terminates(e mouse.Event) bool{
+func (m *Machine) left(e mouse.Event) bool  { return e.Button == mouse.ButtonLeft }
+func (m *Machine) right(e mouse.Event) bool { return e.Button == mouse.ButtonRight }
+func (m *Machine) mid(e mouse.Event) bool   { return e.Button == mouse.ButtonMiddle }
+func (m *Machine) none(e mouse.Event) bool  { return e.Button == mouse.ButtonNone }
+func (m *Machine) terminates(e mouse.Event) bool {
 	return m.release(e) && m.down == 0
 }
 
 func (m *Machine) Run() chan mouse.Event {
-	go func(){
+	go func() {
 		fn := none
-		for e := range m.Sink{
+		for e := range m.Sink {
 			fn = fn(m, e)
 		}
 	}()
@@ -187,19 +187,19 @@ func none(m *Machine, e mouse.Event) StateFn {
 	return none
 }
 
-func marking(m *Machine, e mouse.Event) StateFn{
+func marking(m *Machine, e mouse.Event) StateFn {
 	m.first = e
 	m.Send(MarkEvent{Event: e})
 	m.lastsweep = e
 	m.ctr = 0
 	t := time.Now()
 	if m.lastclick.Button == 1 && t.Sub(m.lastclick.Time) < m.double {
-			m.lastclick = ClickEvent{
-				Event: e,
-				Double: true,
-				Time: t,
-			}
-			m.Send(m.lastclick)
+		m.lastclick = ClickEvent{
+			Event:  e,
+			Double: true,
+			Time:   t,
+		}
+		m.Send(m.lastclick)
 	}
 	return sweeping(m, e)
 }
@@ -212,14 +212,14 @@ func selecting(m *Machine, e mouse.Event) StateFn {
 	return none
 }
 
-func sweeping(m *Machine, e mouse.Event) StateFn{
+func sweeping(m *Machine, e mouse.Event) StateFn {
 	if m.terminates(e) {
-		switch{
+		switch {
 		case m.CloseTo(e, m.first):
 			t := time.Now()
 			m.lastclick = ClickEvent{
 				Event: e,
-				Time: t,
+				Time:  t,
 			}
 			m.Send(m.lastclick)
 			return none
@@ -237,8 +237,8 @@ func sweeping(m *Machine, e mouse.Event) StateFn{
 			fmt.Printf("InsertEvent: = %#v\n", e)
 			return inserting(m, e)
 		}
-	}	
-	if !m.CloseTo(e, m.lastsweep){
+	}
+	if !m.CloseTo(e, m.lastsweep) {
 		e.Button = m.first.Button
 		fmt.Printf("SweepEvent: = %#v\n", e)
 		m.Send(SweepEvent{Event: e, Ctr: m.ctr})
@@ -249,7 +249,7 @@ func sweeping(m *Machine, e mouse.Event) StateFn{
 }
 func snarfing(m *Machine, e mouse.Event) StateFn {
 	fmt.Printf("snarfing: event = %#v\n", e)
-	if m.press(e)  {
+	if m.press(e) {
 		if m.mid(e) {
 			fmt.Printf("SnarfEvent: = %#v\n", e)
 			m.Send(SnarfEvent{Event: e})
@@ -258,8 +258,8 @@ func snarfing(m *Machine, e mouse.Event) StateFn {
 		if m.right(e) {
 			return inserting(m, e)
 		}
-	} 
-	if m.terminates(e){
+	}
+	if m.terminates(e) {
 		return commit(m, e)
 	}
 	return snarfing
@@ -267,10 +267,10 @@ func snarfing(m *Machine, e mouse.Event) StateFn {
 
 func inserting(m *Machine, e mouse.Event) StateFn {
 	fmt.Printf("inserting: event = %#v\n", e)
-	switch{
+	switch {
 	case m.press(e):
-		switch{
-		case m.mid(e): 
+		switch {
+		case m.mid(e):
 			return snarfing(m, e)
 		case m.right(e):
 			m.f.selecting = false
@@ -289,29 +289,29 @@ func commit(m *Machine, e mouse.Event) StateFn {
 	return none
 }
 
-func (m *Mouse) Process(e mouse.Event){
+func (m *Mouse) Process(e mouse.Event) {
 	m.Sink <- e
 	return
 }
 
-func (m *Mouse) Pt() image.Point{
+func (m *Mouse) Pt() image.Point {
 	return m.At
 }
 
 // Double returns true if and only if the previous
 // event is part of a double click
-func (m *Mouse) Double() bool{
+func (m *Mouse) Double() bool {
 	a, b := m.Last[0], m.Last[1]
-	if a.Button == mouse.ButtonNone{
+	if a.Button == mouse.ButtonNone {
 		return false
 	}
-	if a.Button != b.Button{
+	if a.Button != b.Button {
 		return false
 	}
-	if m.Last[0].Time == m.last{
+	if m.Last[0].Time == m.last {
 		return false
 	}
-	if m.Last[1].Time == m.last{
+	if m.Last[1].Time == m.last {
 		return false
 	}
 	if a.Time.Sub(b.Time) <= m.doubled {

@@ -2,17 +2,17 @@ package frame
 
 import (
 	"bytes"
-	"image"
 	"golang.org/x/image/font"
+	"image"
 )
 
-type Font struct{
+type Font struct {
 	font.Face
 	height int
 }
 
-func NewFont(face font.Face) *Font{
-	if face == nil{
+func NewFont(face font.Face) *Font {
+	if face == nil {
 		panic("NewFont: nil font face")
 	}
 	return &Font{
@@ -20,49 +20,49 @@ func NewFont(face font.Face) *Font{
 	}
 }
 
-func (f *Font) Height() int{
-	if f.Face == nil{
+func (f *Font) Height() int {
+	if f.Face == nil {
 		return 0
 	}
-	if f.height == 0{
-		f.height = int(f.Metrics().Height>>6)+1
+	if f.height == 0 {
+		f.height = int(f.Metrics().Height>>6) + 1
 	}
 	return f.height
 }
 
 type Dot struct {
 	image.Point
-	origin     image.Point
-	maxw       int
-	font *Font
+	origin image.Point
+	maxw   int
+	font   *Font
 }
 
 func NewDot(origin image.Point, maxw int, font *Font) *Dot {
-	if font == nil{
+	if font == nil {
 		panic("NewDot: font is nil")
 	}
 	return &Dot{
-		Point:      origin,
-		origin:     origin,
-		maxw:       maxw,
-		font: font,
+		Point:  origin,
+		origin: origin,
+		maxw:   maxw,
+		font:   font,
 	}
 }
 
-func (d *Dot) advance(r rune) int{
+func (d *Dot) advance(r rune) int {
 	dx, _ := d.font.GlyphAdvance(r)
 	return int(dx >> 6)
 }
 
-func (d *Dot) Advance(r rune) int{
+func (d *Dot) Advance(r rune) int {
 	if r == '\t' {
-	 	return d.advance(' ')*4
+		return d.advance(' ') * 4
 	}
 	return d.advance(r)
 }
 
-func (d *Dot) Visible(r rune) bool{
-	switch r{
+func (d *Dot) Visible(r rune) bool {
+	switch r {
 	case '\t', '\n':
 		return false
 	}
@@ -76,9 +76,9 @@ func (d *Dot) Newline() {
 
 // fits returns the number of pixels that would be advance
 // if r were printed, or -1 if r doesn't fit on the line
-func (d *Dot) fits(r rune) int{
+func (d *Dot) fits(r rune) int {
 	adv := d.Advance(r)
-	if d.Width() + adv > d.maxw{
+	if d.Width()+adv > d.maxw {
 		return -1
 	}
 	return adv
@@ -86,7 +86,7 @@ func (d *Dot) fits(r rune) int{
 
 // Insert advances dot by the width of r, or starts a new
 // line if r doesn't fit
-func (d *Dot) Insert(r rune) image.Point{
+func (d *Dot) Insert(r rune) image.Point {
 	if adv := d.fits(r); adv == -1 || r == rune('\n') {
 		d.Newline()
 	} else {
@@ -100,7 +100,6 @@ func (d *Dot) Insert(r rune) image.Point{
 func (d *Dot) Width() int {
 	return d.X - d.origin.X
 }
-
 
 func nlpos(p []byte) (i int) {
 	return bytes.Index(p, NL)

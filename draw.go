@@ -4,14 +4,21 @@ import (
 	"image"
 	"image/color"
 	"image/draw"
-	
 
 	"golang.org/x/image/font"
 	"golang.org/x/image/math/fixed"
 )
 
-func (f *Frame) Draw() {
-	f.Redraw(f.selecting)
+func (f *Frame) Draw(force bool) {
+	f.Tick.Draw()
+	if !force {
+		for _, r := range f.DirtyRange() {
+			f.RedrawRange(r.I, r.J)
+		}
+	} else {
+		f.Redraw(f.selecting)
+	}
+	f.CleanRange()
 }
 
 type Drawer interface {
@@ -111,32 +118,47 @@ func (f *Frame) resize(size image.Point) {
 // that the frame is Dirty before calling this in a tight
 // loop
 func (f *Frame) Redraw(selecting bool) {
-	dot := NewDot(f.Origin(), f.Option.Wrap, f.Font)
 	draw.Draw(f.disp, f.Bounds(), f.Colors.Back, image.ZP, draw.Src)
-	
-	for s := f.s[:f.nbytes]; len(s) != 0;  {
+	f.RedrawRange(0, f.nbytes)
+}
+
+func (f *Frame) RedrawRange(i, j int) {
+	dot := NewDot(f.Origin(), f.Option.Wrap, f.Font)
+	//draw.Draw(f.disp, f.Bounds(), f.Colors.Back, image.ZP, draw.Src)
+
+	if i > j {
+		i, j = j, i
+	}
+	if i < 0 {
+		i = 0
+	}
+	if j > f.nbytes {
+		j = f.nbytes
+	}
+	dot.Point = f.PointOf(i)
+	for s := f.s[i:j]; len(s) != 0; {
 		i, sp := 0, dot.Point
-		for ;i < len(s) && sp.Y == dot.Y; i++{
+		w := sp.X
+		for ; i < len(s) && sp.Y == dot.Y; i++ {
+			w = dot.X
 			dot.Insert(rune(s[i]))
 		}
-		if i-1 >= 0 && i-1 < len(s) && s[i-1] == '\n'{
+		r := image.Rect(sp.X, sp.Y, w, sp.Y+dot.font.Height())
+		draw.Draw(f.disp, r, f.Colors.Back, image.ZP, draw.Src)
+		if i-1 >= 0 && i-1 < len(s) && s[i-1] == '\n' {
 			f.drawtext(sp, dot.maxw, s[:i-1])
 		} else {
 			f.drawtext(sp, dot.maxw, s[:i])
 		}
 		s = s[i:]
 	}
-	if selecting {
-		//f.Tick.Sweep(f.Tick.P1)
-	}
-	 f.Tick.Draw()
+	f.Tick.Draw()
 	if f.Menu.visible {
 		f.Menu.Draw(f.disp)
 		//f.drawmenu(f.mousecache)
 	}
 	f.dirty = false
 }
-
 
 // drawtext draws the slice s at position p and returns
 // the horizontal displacement dx without line wrapping
@@ -153,13 +175,13 @@ func (f *Frame) stringbg(dst draw.Image, p image.Point, src image.Image, sp imag
 	h := f.Font.Height()
 	h = int(float64(h) - float64(h)/float64(5))
 	i := 0
-	if f.dot == nil{
+	if f.dot == nil {
 		f.dot = NewDot(f.Origin(), f.Option.Wrap, f.Font)
 	}
 	for _, v := range s {
 		fp := fixed.P(p.X, p.Y)
-		
-		if f.dot.Visible(rune(v)){
+
+		if f.dot.Visible(rune(v)) {
 			dr, mask, maskp, _, ok := font.Glyph(fp, rune(v))
 			if !ok {
 				break
@@ -168,7 +190,7 @@ func (f *Frame) stringbg(dst draw.Image, p image.Point, src image.Image, sp imag
 			dr.Max.Y += h
 			draw.DrawMask(dst, dr, src, sp, mask, maskp, draw.Over)
 		}
-		
+
 		dx := f.dot.Advance(rune(v))
 		//dx := int((advance + f.Font.Kern(f.last, rune(v))) >> 6)
 		p.X += dx
@@ -186,7 +208,7 @@ func (f *Frame) stringbg(dst draw.Image, p image.Point, src image.Image, sp imag
 // is a rectanguloid over three intersecting rectangles representing
 // the highlight bounds.
 func (t *Tick) drawsel(p, q image.Point, bg image.Image) {
-	t.Pen[0].Draw(p,q,bg)
+	t.Pen[0].Draw(p, q, bg)
 }
 
 func abs(x int) int {
