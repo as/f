@@ -24,9 +24,12 @@ func ST(p image.Point, wh image.Point) f64.Aff3 {
 */
 
 func (f *Frame) alignY(pt image.Point) image.Point {
-	op := f.Origin()
+	return alignY(f.FontHeight(), f.Origin(), pt)
+}
+func alignY(height int, origin, pt image.Point) image.Point {
+	op := origin
 	pt = pt.Sub(op)
-	pt.Y -= pt.Y % f.FontHeight()
+	pt.Y -= pt.Y % height
 	pt = pt.Add(op)
 	return pt
 }

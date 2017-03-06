@@ -79,7 +79,7 @@ func main() {
 			case frame.MarkEvent:
 				fmt.Printf("frame.MarkEvent: %#v\n", e)
 				pt := image.Pt(int(e.X), int(e.Y))
-				i := fr.IndexOf(pt)
+				i, _ := fr.IndexOf(pt)
 				switch e.Button{
 				case 1:
 					t.Open(i)
@@ -95,7 +95,7 @@ func main() {
 					continue
 				}
 				pt := image.Pt(int(e.X), int(e.Y))
-				i := fr.IndexOf(pt)
+				i, _ := fr.IndexOf(pt)
 				switch e.Button{
 				case 3:
 					t.Pen[2].Sweep(i)
@@ -109,7 +109,7 @@ func main() {
 			case frame.ClickEvent:
 				fmt.Printf("frame.ClickEvent: %#v\n", e)
 				pt := image.Pt(int(e.X), int(e.Y))
-				i := fr.IndexOf(pt)
+				i, _ := fr.IndexOf(pt)
 				switch e.Button{
 				case 1:
 					if e.Double{
@@ -144,7 +144,7 @@ func main() {
 				debugln("f.Mouse.OnSelect")
 				fmt.Printf("event information: %#v\n", e)
 				pt := image.Pt(int(e.X), int(e.Y))
-				i := fr.IndexOf(pt)
+				i, _ := fr.IndexOf(pt)
 				switch e.Button {
 				case 3:
 					h, _ := t.Pen[2].Addr()

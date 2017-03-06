@@ -1,6 +1,7 @@
 package frame
 
 import (
+	"fmt"
 	"image"
 )
 
@@ -10,43 +11,60 @@ func (f *Frame) Origin() image.Point {
 	return f.Bounds().Min.Add(f.origin)
 }
 
-// IndexOf computes the index of the glyph containing pt
-func (f *Frame) IndexOf(pt image.Point) (i int) {
-	//defer func() { fmt.Printf("IndexOf: pt=%v i=%d (%c)\n", pt, i, f.s[i])}()
+func (f *Frame) Box(bn int) *Box {
+	return f.boxes.Box[bn]
+}
+
+func (f *Frame) IndexOf(pt image.Point) (bn, offset int) {
 	pt = f.alignY(pt)
 	dot := NewDot(f.Origin(), f.Option.Wrap, f.Font)
-	s := f.s[:f.nbytes]
-	for i = 0; i < len(s); i++ {
+	var box *Box
+	for bn, box = range f.Boxes() {
 		switch {
 		case dot.Y < pt.Y:
 			// nothing special
 		case dot.Y == pt.Y:
-			// same line
-			if dot.X+dot.Advance(rune(s[i]))/2 >= pt.X {
-				return i
-			}
+			// point intersects box
+			dot.indexOf(f.Box(bn), pt)
 		case dot.Y > pt.Y:
 			// advanced too far
-			if i-1 < 0 {
+			if bn-1 < 0 {
 				// bug fix for crash: happened when selecting
 				// and dragging all the way to the top
-				return i
-			}
-			if s[i-1] == '\n' {
-				// a hard newline
-				return i - 1
-			} else {
-				// line wrapped
-				return i
+				return bn, offset
 			}
 		}
-		dot.Insert(rune(s[i]))
+		dot.InsertBox(box)
+		offset += box.Len()
 	}
-	return i
+	return
+}
+
+// PointOf computes the point of origin for glyph x
+func (f *Frame) PointOf(x int) (pt image.Point) {
+	defer func() { fmt.Printf("PointOf: pt=%v x=%d\n", pt, x) }()
+	pt = f.alignY(pt)
+	dot := NewDot(f.Origin(), f.Option.Wrap, f.Font)
+	i := 0
+	bn := 0
+	var box *Box
+	for bn, box = range f.Boxes() {
+		if i+box.Len() == x {
+			return dot.Point
+		}
+		if i+box.Len() > x {
+			break
+		}
+		dot.InsertBox(box)
+		i += box.Len()
+	}
+	bn, _ = f.boxes.Find(bn-1, i, x)
+	dot.InsertBox(f.Box(bn))
+	return dot.Point
 }
 
 // PointOf computes the point of origin for glyph i
-func (f *Frame) PointOf(i int) (pt image.Point) {
+func (f *Frame) zPointOf(i int) (pt image.Point) {
 	//	defer func(){fmt.Printf("PointOf: pt=%v i=%d (%c)\n", pt, i, f.s[i])}()
 	if i < 0 {
 		i = 0

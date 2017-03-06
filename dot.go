@@ -71,13 +71,25 @@ func (d *Dot) Visible(r rune) bool {
 
 func (d *Dot) Newline() {
 	d.X = d.origin.X
-	d.Y += d.font.Height()
+	d.Y += d.Height()
+}
+
+func (d *Dot) Origin() image.Point {
+	return d.origin
 }
 
 // fits returns the number of pixels that would be advance
 // if r were printed, or -1 if r doesn't fit on the line
 func (d *Dot) fits(r rune) int {
 	adv := d.Advance(r)
+	if d.Width()+adv > d.maxw {
+		return -1
+	}
+	return adv
+}
+
+func (d *Dot) fitsbox(b *Box) int {
+	adv := b.Width()
 	if d.Width()+adv > d.maxw {
 		return -1
 	}
@@ -95,12 +107,63 @@ func (d *Dot) Insert(r rune) image.Point {
 	return d.Point
 }
 
+func (d *Dot) InsertBox(b *Box) image.Point {
+	if adv := d.fitsbox(b); adv == -1 {
+		d.Newline()
+	} else {
+		d.X += adv
+	}
+	return d.Point
+}
+
+// IndexOf computes the index of the glyph containing pt
+func (dot *Dot) indexOf(box *Box, pt image.Point) (i int) {
+	//defer func() { fmt.Printf("IndexOf: pt=%v i=%d (%c)\n", pt, i, f.s[i])}()
+	pt = dot.alignY(pt)
+	s := box.Bytes()
+	for i = 0; i < len(s); i++ {
+		switch {
+		case dot.Y < pt.Y:
+			// nothing special
+		case dot.Y == pt.Y:
+			// same line
+			if dot.X+dot.Advance(rune(s[i]))/2 >= pt.X {
+				return i
+			}
+		case dot.Y > pt.Y:
+			// advanced too far
+			if i-1 < 0 {
+				// bug fix for crash: happened when selecting
+				// and dragging all the way to the top
+				return i
+			}
+			if s[i-1] == '\n' {
+				// a hard newline
+				return i - 1
+			} else {
+				// line wrapped
+				return i
+			}
+		}
+		dot.Insert(rune(s[i]))
+	}
+	return i
+}
+
 // Width returns the amount of horizontal pixels covered by dot
 // starting from the origin
 func (d *Dot) Width() int {
 	return d.X - d.origin.X
 }
 
+func (d *Dot) Height() int {
+	return d.font.Height()
+}
+
 func nlpos(p []byte) (i int) {
 	return bytes.Index(p, NL)
+}
+
+func (d *Dot) alignY(pt image.Point) image.Point {
+	return alignY(d.Height(), d.Origin(), pt)
 }

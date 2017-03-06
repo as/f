@@ -77,7 +77,12 @@ type Frame struct {
 	Menu       *Menu
 	Mouse      *Mouse
 
-	dot *Dot
+	boxes *Boxes
+	dot   *Dot
+}
+
+func (f *Frame) Boxes() []*Box {
+	return f.boxes.Box
 }
 
 type Colors struct {
@@ -155,25 +160,8 @@ func New(origin, size image.Point, events Sender, opt *Option) *Frame {
 	f.cached = image.NewRGBA(image.Rectangle{image.ZP, image.Pt(f.FontHeight(), f.FontHeight())})
 	f.flushcache()
 	f.Mouse = NewMouse(time.Second/3, events, f)
+	f.boxes = NewBoxes(f.measure)
 	return f
-}
-
-func (o Option) FontHeight() int {
-	return o.Font.Height()
-}
-
-func ParseDefaultFont(size float64) font.Face {
-	return parseDefaultFont(size)
-}
-
-func parseDefaultFont(size float64) font.Face {
-	f, err := truetype.Parse(gomedium.TTF)
-	if err != nil {
-		panic(err)
-	}
-	return truetype.NewFace(f, &truetype.Options{
-		Size: size,
-	})
 }
 
 type Range struct {
@@ -193,19 +181,22 @@ func (f *Frame) CleanRange() {
 // Insert inserts s starting from index i in the
 // the frame buffer.
 func (f *Frame) Insert(s []byte, i int) (err error) {
-	if i >= len(f.s) {
-		i = len(f.s) - 1
-	}
-	if i < 0 {
-		i = 0
-	}
-	if s == nil {
-		return nil
-	}
-	f.grow(len(s) + 1)
-	f.nbytes += len(s)
-	copy(f.s[i+len(s):], f.s[i:])
-	copy(f.s[i:], s)
+	/*
+		if i >= len(f.s) {
+			i = len(f.s) - 1
+		}
+		if i < 0 {
+			i = 0
+		}
+		if s == nil {
+			return nil
+		}
+		f.grow(len(s) + 1)
+		f.nbytes += len(s)
+		copy(f.s[i+len(s):], f.s[i:])
+		copy(f.s[i:], s)
+	*/
+	f.boxes.Insert(s, i)
 	f.MarkRange(i, i+len(s))
 	f.dirty = true
 	return nil
@@ -333,4 +324,22 @@ func (c *Cache) Set(bounds image.Rectangle, i int, b byte) {
 	c.b = b
 	c.i = i
 	c.valid = false
+}
+
+func (o Option) FontHeight() int {
+	return o.Font.Height()
+}
+
+func ParseDefaultFont(size float64) font.Face {
+	return parseDefaultFont(size)
+}
+
+func parseDefaultFont(size float64) font.Face {
+	f, err := truetype.Parse(gomedium.TTF)
+	if err != nil {
+		panic(err)
+	}
+	return truetype.NewFace(f, &truetype.Options{
+		Size: size,
+	})
 }

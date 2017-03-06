@@ -9,7 +9,7 @@ import (
 
 type Resolver interface {
 	PointOf(int) image.Point
-	IndexOf(image.Point) int
+	IndexOf(image.Point) (int, int)
 	Height() int
 	Origin() image.Point
 }

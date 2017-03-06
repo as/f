@@ -1,12 +1,12 @@
 package frame
 
 import (
+	"fmt"
+	"golang.org/x/image/font"
+	"golang.org/x/image/math/fixed"
 	"image"
 	"image/color"
 	"image/draw"
-
-	"golang.org/x/image/font"
-	"golang.org/x/image/math/fixed"
 )
 
 func (f *Frame) Draw(force bool) {
@@ -44,55 +44,6 @@ func (f *Frame) drawmenu(pt image.Point) {
 	//Ellipse(f.disp, pt, B, 94, 94, 1, image.ZP, 1, 5)
 }
 
-// Ellipse draws a filled ellipse at center point c
-// and eccentricity a and b. The thick argument is ignored
-// (until a line drawing function is available)
-//
-// The method uses an efficient integer-based rasterization
-// technique originally described in:
-//
-// McIlroy, M.D.: There is no royal road to programs: a trilogy
-// on raster ellipses and programming methodology,
-// Computer Science TR155, AT&T Bell Laboratories, 1990
-//
-func Ellipse(dst draw.Image, c image.Point, src image.Image, a, b, thick int, sp image.Point, alpha, phi int) {
-	xc, yc := c.X, c.Y
-	var (
-		x, y       = 0, b
-		a2, b2     = a * a, b * b
-		crit1      = -(a2/4 + a%2 + b2)
-		crit2      = -(b2/4 + b%2 + a2)
-		crit3      = -(b2/4 + b%2)
-		t          = -a2 * y
-		dxt, dyt   = 2 * b2 * x, -2 * a2 * y
-		d2xt, d2yt = 2 * b2, 2 * a2
-		incx       = func() { x++; dxt += d2xt; t += dxt }
-		incy       = func() { y--; dyt += d2yt; t += dyt }
-	)
-	point := func(x, y int) {
-		draw.Draw(dst, image.Rect(x, y, x+1, yc), src, sp, draw.Over)
-	}
-
-	for y >= 0 && x <= a {
-		point(xc+x, yc+y)
-		if x != 0 || y != 0 {
-			point(xc-x, yc-y)
-		}
-		if x != 0 && y != 0 {
-			point(xc+x, yc-y)
-			point(xc-x, yc+y)
-		}
-		if t+b2*x <= crit1 || t+a2*y <= crit3 {
-			incx()
-		} else if t-a2*y > crit2 {
-			incy()
-		} else {
-			incx()
-			incy()
-		}
-	}
-}
-
 func (f *Frame) Resize(size image.Point) {
 	f.Tick.Resize(size)
 	f.resize(size)
@@ -123,41 +74,54 @@ func (f *Frame) Redraw(selecting bool) {
 }
 
 func (f *Frame) RedrawRange(i, j int) {
-	dot := NewDot(f.Origin(), f.Option.Wrap, f.Font)
-	//draw.Draw(f.disp, f.Bounds(), f.Colors.Back, image.ZP, draw.Src)
+	f.boxes.Dump()
+	bi, _ := f.boxes.Find(0, 0, i)
+	bj, _ := f.boxes.Find(bi, 0, j)
+	fmt.Printf("note: i=%d j=%d bi=%d bj=%d\n", i, j, bi, bj)
+	bi = 0
+	bj = len(f.boxes.Box)
+	f.RedrawBox(bi, bj)
+}
 
-	if i > j {
-		i, j = j, i
+func note(i, j int) {
+	fmt.Printf("note: i=%d j=%d\n", i, j)
+}
+
+func (f *Frame) RedrawBox(i, j int) {
+	dot := NewDot(f.Origin(), f.Option.Wrap, f.Font)
+	note(i, j)
+	for _, box := range f.Boxes()[i:j] {
+		i, sp := 0, dot.Point
+		w := sp.X
+		dot.InsertBox(box)
+		r := image.Rect(sp.X, sp.Y, w, sp.Y+dot.font.Height())
+		draw.Draw(f.disp, r, f.Colors.Back, image.ZP, draw.Src)
+		s := box.Bytes()
+		if i-1 >= 0 && i-1 < len(s) && s[i-1] == '\n' {
+			f.RedrawBytes(dot.Point, dot.maxw, s)
+		} else {
+			f.RedrawBytes(dot.Point, dot.maxw, s)
+		}
 	}
-	if i < 0 {
-		i = 0
-	}
-	if j > f.nbytes {
-		j = f.nbytes
-	}
-	dot.Point = f.PointOf(i)
-	for s := f.s[i:j]; len(s) != 0; {
+}
+
+func (f *Frame) RedrawBytes(origin image.Point, width int, s []byte) {
+	fmt.Printf("RedrawBytes: origin=%v width=%v s=%q\n", origin, width, s)
+	dot := NewDot(origin, width, f.Font)
+	for s := s; len(s) != 0; {
 		i, sp := 0, dot.Point
 		w := sp.X
 		for ; i < len(s) && sp.Y == dot.Y; i++ {
 			w = dot.X
 			dot.Insert(rune(s[i]))
 		}
-		r := image.Rect(sp.X, sp.Y, w, sp.Y+dot.font.Height())
-		draw.Draw(f.disp, r, f.Colors.Back, image.ZP, draw.Src)
 		if i-1 >= 0 && i-1 < len(s) && s[i-1] == '\n' {
-			f.drawtext(sp, dot.maxw, s[:i-1])
+			f.drawtext(sp, dot.maxw-w, s[:i-1])
 		} else {
-			f.drawtext(sp, dot.maxw, s[:i])
+			f.drawtext(sp, dot.maxw-w, s[:i])
 		}
 		s = s[i:]
 	}
-	f.Tick.Draw()
-	if f.Menu.visible {
-		f.Menu.Draw(f.disp)
-		//f.drawmenu(f.mousecache)
-	}
-	f.dirty = false
 }
 
 // drawtext draws the slice s at position p and returns
@@ -216,4 +180,53 @@ func abs(x int) int {
 		return -x
 	}
 	return x
+}
+
+// Ellipse draws a filled ellipse at center point c
+// and eccentricity a and b. The thick argument is ignored
+// (until a line drawing function is available)
+//
+// The method uses an efficient integer-based rasterization
+// technique originally described in:
+//
+// McIlroy, M.D.: There is no royal road to programs: a trilogy
+// on raster ellipses and programming methodology,
+// Computer Science TR155, AT&T Bell Laboratories, 1990
+//
+func Ellipse(dst draw.Image, c image.Point, src image.Image, a, b, thick int, sp image.Point, alpha, phi int) {
+	xc, yc := c.X, c.Y
+	var (
+		x, y       = 0, b
+		a2, b2     = a * a, b * b
+		crit1      = -(a2/4 + a%2 + b2)
+		crit2      = -(b2/4 + b%2 + a2)
+		crit3      = -(b2/4 + b%2)
+		t          = -a2 * y
+		dxt, dyt   = 2 * b2 * x, -2 * a2 * y
+		d2xt, d2yt = 2 * b2, 2 * a2
+		incx       = func() { x++; dxt += d2xt; t += dxt }
+		incy       = func() { y--; dyt += d2yt; t += dyt }
+	)
+	point := func(x, y int) {
+		draw.Draw(dst, image.Rect(x, y, x+1, yc), src, sp, draw.Over)
+	}
+
+	for y >= 0 && x <= a {
+		point(xc+x, yc+y)
+		if x != 0 || y != 0 {
+			point(xc-x, yc-y)
+		}
+		if x != 0 && y != 0 {
+			point(xc+x, yc-y)
+			point(xc-x, yc+y)
+		}
+		if t+b2*x <= crit1 || t+a2*y <= crit3 {
+			incx()
+		} else if t-a2*y > crit2 {
+			incy()
+		} else {
+			incx()
+			incy()
+		}
+	}
 }
